@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CYBERINTEL // Domain Scanner</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-6 font-mono">
+
+  <div class="max-w-4xl mx-auto space-y-6">
+    <!-- Header -->
+    <header class="flex justify-between items-center border-b border-cyan-500/40 pb-4">
+      <div>
+        <h1 class="text-2xl font-bold tracking-widest text-cyan-400">CYBERINTEL // SCANNER</h1>
+        <p class="text-xs text-slate-400">Threat Intelligence & WHOIS Analysis Engine</p>
+      </div>
+      <span id="statusApi" class="text-xs px-3 py-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">SYSTEM READY</span>
+    </header>
+
+    <!-- Search Form -->
+    <form id="scanForm" class="flex gap-2">
+      <input type="text" id="domainInput" placeholder="Masukkan domain (contoh: google.com atau bad-site.com)..." required
+             class="flex-1 bg-slate-900 border border-slate-700 rounded px-4 py-3 focus:outline-none focus:border-cyan-400 text-white placeholder-slate-500">
+      <button type="submit" id="btnScan" class="bg-cyan-500 hover:bg-cyan-400 text-slate-950 px-8 py-3 rounded font-bold transition">
+        SCAN DOMAIN
+      </button>
+    </form>
+
+    <!-- Loading Indicator -->
+    <div id="loading" class="hidden text-center py-8 text-cyan-400 animate-pulse">
+      ⚡ Analyzing domain reputation with VirusTotal API...
+    </div>
+
+    <!-- Result Card -->
+    <div id="resultCard" class="hidden bg-slate-900 border border-slate-800 rounded-lg p-6 space-y-4">
+      <div class="flex justify-between items-start border-b border-slate-800 pb-4">
+        <div>
+          <span class="text-xs text-slate-400 uppercase tracking-wider">TARGET DOMAIN</span>
+          <h2 id="resDomain" class="text-2xl font-bold text-white"></h2>
+        </div>
+        <span id="resBadge" class="px-3 py-1 rounded text-xs font-bold border"></span>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4 text-sm">
+        <div class="bg-slate-950 p-3 rounded border border-slate-800">
+          <span class="text-slate-400 text-xs">REGISTRAR</span>
+          <p id="resRegistrar" class="font-semibold text-slate-200 mt-1"></p>
+        </div>
+        <div class="bg-slate-950 p-3 rounded border border-slate-800">
+          <span class="text-slate-400 text-xs">CREATION DATE</span>
+          <p id="resCreated" class="font-semibold text-slate-200 mt-1"></p>
+        </div>
+      </div>
+
+      <!-- Security Stats -->
+      <div class="bg-slate-950 p-4 rounded border border-slate-800 space-y-2">
+        <span class="text-xs text-slate-400">VIRUSTOTAL VENDOR VERDICT</span>
+        <div class="grid grid-cols-3 gap-2 text-center pt-2">
+          <div class="p-2 rounded bg-rose-500/10 border border-rose-500/30">
+            <div id="resMalicious" class="text-xl font-bold text-rose-400">0</div>
+            <div class="text-[10px] text-rose-300">MALICIOUS</div>
+          </div>
+          <div class="p-2 rounded bg-emerald-500/10 border border-emerald-500/30">
+            <div id="resHarmless" class="text-xl font-bold text-emerald-400">0</div>
+            <div class="text-[10px] text-emerald-300">CLEAN / SAFE</div>
+          </div>
+          <div class="p-2 rounded bg-slate-800 border border-slate-700">
+            <div id="resReputation" class="text-xl font-bold text-slate-300">0</div>
+            <div class="text-[10px] text-slate-400">REPUTATION SCORE</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scan History -->
+    <div class="bg-slate-900 border border-slate-800 rounded-lg p-6">
+      <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">RECENT LOGS (SUPABASE DB)</h3>
+      <ul id="historyList" class="space-y-2 text-sm">
+        <li class="text-slate-500 text-center py-2">Memuat riwayat scan...</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:5000/api';
+
+    const scanForm = document.getElementById('scanForm');
+    const domainInput = document.getElementById('domainInput');
+    const btnScan = document.getElementById('btnScan');
+    const loading = document.getElementById('loading');
+    const resultCard = document.getElementById('resultCard');
+    const historyList = document.getElementById('historyList');
+
+    // Fetch Scan History
+    async function loadHistory() {
+      try {
+        const res = await fetch(`${API_URL}/history`);
+        const logs = await res.json();
+        
+        if (!logs || logs.length === 0) {
+          historyList.innerHTML = `<li class="text-slate-500 text-center py-2">Belum ada riwayat scan.</li>`;
+          return;
+        }
+
+        historyList.innerHTML = logs.map(log => `
+          <li class="flex justify-between items-center p-3 bg-slate-950 border border-slate-800 rounded">
+            <span class="font-semibold text-cyan-300">${log.domain}</span>
+            <div class="flex items-center gap-3">
+              <span class="text-xs text-rose-400">${log.malicious_count} Flagged</span>
+              <span class="text-xs px-2 py-0.5 rounded ${log.status.includes('CLEAN') ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}">
+                ${log.status}
+              </span>
+            </div>
+          </li>
+        `).join('');
+      } catch (err) {
+        console.error("Error history:", err);
+      }
+    }
+
+    // Handle Domain Scan
+    scanForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const domain = domainInput.value.trim();
+      if (!domain) return;
+
+      loading.classList.remove('hidden');
+      resultCard.classList.add('hidden');
+      btnScan.disabled = true;
+
+      try {
+        const res = await fetch(`${API_URL}/scan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          alert(data.error || 'Gagal melakukan scan.');
+          return;
+        }
+
+        // Display Results
+        document.getElementById('resDomain').textContent = data.domain;
+        document.getElementById('resRegistrar').textContent = data.registrar;
+        document.getElementById('resCreated').textContent = data.creation_date;
+        document.getElementById('resMalicious').textContent = data.malicious;
+        document.getElementById('resHarmless').textContent = data.harmless;
+        document.getElementById('resReputation').textContent = data.reputation;
+
+        const badge = document.getElementById('resBadge');
+        if (data.status.includes('CLEAN')) {
+          badge.textContent = 'CLEAN / SAFE';
+          badge.className = 'px-3 py-1 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+        } else {
+          badge.textContent = 'THREAT DETECTED';
+          badge.className = 'px-3 py-1 rounded text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40';
+        }
+
+        resultCard.classList.remove('hidden');
+        loadHistory();
+
+      } catch (err) {
+        alert('Gagal terhubung ke server backend.');
+      } finally {
+        loading.classList.add('hidden');
+        btnScan.disabled = false;
+      }
+    });
+
+    loadHistory();
+  </script>
+</body>
+</html>
